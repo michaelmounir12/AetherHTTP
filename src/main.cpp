@@ -9,6 +9,7 @@
 
 #include <cerrno>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <thread> // for std::thread::hardware_concurrency
 
@@ -24,6 +25,54 @@ int main() {
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+namespace {
+
+void send_http_response(int client_fd,
+                        std::string_view status_line,
+                        std::string_view content_type,
+                        const std::string& body) {
+  std::string response;
+  response.reserve(256 + body.size());
+  response.append(status_line);
+  response.append("\r\n");
+  response.append("Content-Type: ");
+  response.append(content_type);
+  response.append("\r\nConnection: close\r\nContent-Length: ");
+  response.append(std::to_string(body.size()));
+  response.append("\r\n\r\n");
+  response.append(body);
+
+  const char* p = response.data();
+  std::size_t remaining = response.size();
+  while (remaining > 0) {
+    const ssize_t sent = ::send(client_fd, p, remaining, 0);
+    if (sent < 0) {
+      if (errno == EINTR) continue;
+      Logger::instance().log(Logger::Level::Warn,
+                             std::string("send() failed: ") + std::strerror(errno));
+      break;
+    }
+    p += sent;
+    remaining -= static_cast<std::size_t>(sent);
+  }
+}
+
+std::string read_file_to_string(const std::string& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return {};
+  std::string data;
+  in.seekg(0, std::ios::end);
+  const std::streampos size = in.tellg();
+  if (size > 0) {
+    data.resize(static_cast<std::size_t>(size));
+    in.seekg(0, std::ios::beg);
+    in.read(data.data(), size);
+  }
+  return data;
+}
+
+} // namespace
 
 void handle_client(int client_fd) {
   Logger::instance().log(Logger::Level::Info, "Client connected");
@@ -61,36 +110,37 @@ void handle_client(int client_fd) {
     Logger::instance().log(Logger::Level::Info,
                            "HTTP " + req.method() + " " + req.path() + " " + req.version());
 
-    const std::string body =
-        "<!DOCTYPE html>\n"
-        "<html><head><title>Simple Server</title></head>"
-        "<body><h1>Hello from C++ HTTP server</h1>"
-        "<p>You requested: " +
-        req.path() +
-        "</p></body></html>";
+    std::string file_path;
+    if (req.path() == "/" || req.path() == "/index.html") {
+      file_path = "index.html";
+    } else if (req.path() == "/about.html") {
+      file_path = "about.html";
+    }
 
-    std::string response;
-    response.reserve(256 + body.size());
-    response += "HTTP/1.1 200 OK\r\n";
-    response += "Content-Type: text/html; charset=utf-8\r\n";
-    response += "Connection: close\r\n";
-    response += "Content-Length: ";
-    response += std::to_string(body.size());
-    response += "\r\n\r\n";
-    response += body;
-
-    const char* p = response.data();
-    std::size_t remaining = response.size();
-    while (remaining > 0) {
-      const ssize_t sent = ::send(client_fd, p, remaining, 0);
-      if (sent < 0) {
-        if (errno == EINTR) continue;
-        Logger::instance().log(Logger::Level::Warn,
-                               std::string("send() failed: ") + std::strerror(errno));
-        break;
+    if (!file_path.empty()) {
+      const std::string body = read_file_to_string(file_path);
+      if (!body.empty()) {
+        send_http_response(client_fd,
+                           "HTTP/1.1 200 OK",
+                           "text/html; charset=utf-8",
+                           body);
+      } else {
+        const std::string body_404 =
+            "<!DOCTYPE html><html><head><title>404 Not Found</title></head>"
+            "<body><h1>404 Not Found</h1></body></html>";
+        send_http_response(client_fd,
+                           "HTTP/1.1 404 Not Found",
+                           "text/html; charset=utf-8",
+                           body_404);
       }
-      p += sent;
-      remaining -= static_cast<std::size_t>(sent);
+    } else {
+      const std::string body_404 =
+          "<!DOCTYPE html><html><head><title>404 Not Found</title></head>"
+          "<body><h1>404 Not Found</h1></body></html>";
+      send_http_response(client_fd,
+                         "HTTP/1.1 404 Not Found",
+                         "text/html; charset=utf-8",
+                         body_404);
     }
   } else {
     Logger::instance().log(Logger::Level::Warn, "Failed to parse HTTP request");
