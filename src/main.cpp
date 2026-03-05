@@ -156,7 +156,16 @@ void handle_client(int client_fd, std::string client_ip) {
                          body_404);
     }
   } else {
-    Logger::instance().log(Logger::Level::Warn, "Failed to parse HTTP request");
+    Logger::instance().log(Logger::Level::Warn,
+                           "Failed to parse HTTP request from " + client_ip);
+
+    const std::string body_400 =
+        "<!DOCTYPE html><html><head><title>400 Bad Request</title></head>"
+        "<body><h1>400 Bad Request</h1><p>Your request could not be understood.</p></body></html>";
+    send_http_response(client_fd,
+                       "HTTP/1.1 400 Bad Request",
+                       "text/html; charset=utf-8",
+                       body_400);
   }
 
   ::close(client_fd);
