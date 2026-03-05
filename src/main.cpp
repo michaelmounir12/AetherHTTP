@@ -1,13 +1,14 @@
 // Basic TCP server using POSIX sockets that listens on port 8080
-// and handles multiple clients using std::thread.
-// Each client is handled in a separate thread, echoing
+// and handles multiple clients using a ThreadPool.
+// Each client is handled by a worker thread from the pool, echoing
 // received messages back to the client.
 
 #include "Logger.h"
+#include "ThreadPool.h"
 
 #include <cerrno>
 #include <cstring>
-#include <thread>
+#include <thread> // for std::thread::hardware_concurrency
 
 #if !defined(__linux__)
 int main() {
@@ -61,6 +62,11 @@ out:
 int main() {
   Logger::instance().set_level(Logger::Level::Info);
 
+  // Fixed-size thread pool; adjust size as needed.
+  const std::size_t thread_count =
+      std::max<std::size_t>(4, std::thread::hardware_concurrency());
+  ThreadPool pool(thread_count);
+
   int listen_fd = ::socket(AF_INET, SOCK_STREAM, 0);
   if (listen_fd < 0) {
     Logger::instance().log(Logger::Level::Error,
@@ -102,9 +108,8 @@ int main() {
       continue;
     }
 
-    // Launch a new thread to handle this client.
-    std::thread t(handle_client, client_fd);
-    t.detach();  // Detach so we don't need to join; threads clean up on exit.
+    // Queue client handling in the thread pool.
+    pool.enqueue([client_fd] { handle_client(client_fd); });
   }
 }
 
