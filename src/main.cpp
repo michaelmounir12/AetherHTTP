@@ -73,6 +73,23 @@ std::string read_file_to_string(const std::string& path) {
   return data;
 }
 
+std::string guess_content_type(const std::string& path) {
+  auto dot_pos = path.rfind('.');
+  if (dot_pos == std::string::npos) {
+    return "application/octet-stream";
+  }
+  const std::string ext = path.substr(dot_pos + 1);
+  if (ext == "html" || ext == "htm") return "text/html; charset=utf-8";
+  if (ext == "css") return "text/css; charset=utf-8";
+  if (ext == "js") return "application/javascript";
+  if (ext == "json") return "application/json";
+  if (ext == "png") return "image/png";
+  if (ext == "jpg" || ext == "jpeg") return "image/jpeg";
+  if (ext == "gif") return "image/gif";
+  if (ext == "txt") return "text/plain; charset=utf-8";
+  return "application/octet-stream";
+}
+
 } // namespace
 
 void handle_client(int client_fd, std::string client_ip) {
@@ -115,27 +132,35 @@ void handle_client(int client_fd, std::string client_ip) {
     // Basic routing.
     if (req.path() == "/" || req.path() == "/index.html") {
       // Serve index.html if present, otherwise a simple built-in page.
-      std::string body = read_file_to_string("index.html");
-      if (body.empty()) {
+      const std::string file_path = "index.html";
+      std::string body = read_file_to_string(file_path);
+      std::string content_type = "text/html; charset=utf-8";
+      if (!body.empty()) {
+        content_type = guess_content_type(file_path);
+      } else {
         body =
             "<!DOCTYPE html><html><head><title>Home</title></head>"
             "<body><h1>Welcome</h1><p>This is the home page.</p></body></html>";
       }
       send_http_response(client_fd,
                          "HTTP/1.1 200 OK",
-                         "text/html; charset=utf-8",
+                         content_type,
                          body);
     } else if (req.path() == "/about" || req.path() == "/about.html") {
       // Serve about.html if present, otherwise a simple built-in page.
-      std::string body = read_file_to_string("about.html");
-      if (body.empty()) {
+      const std::string file_path = "about.html";
+      std::string body = read_file_to_string(file_path);
+      std::string content_type = "text/html; charset=utf-8";
+      if (!body.empty()) {
+        content_type = guess_content_type(file_path);
+      } else {
         body =
             "<!DOCTYPE html><html><head><title>About</title></head>"
             "<body><h1>About</h1><p>Basic about page.</p></body></html>";
       }
       send_http_response(client_fd,
                          "HTTP/1.1 200 OK",
-                         "text/html; charset=utf-8",
+                         content_type,
                          body);
     } else if (req.path() == "/files") {
       // Simple placeholder for /files route.
