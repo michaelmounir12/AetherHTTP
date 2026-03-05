@@ -19,6 +19,14 @@ ThreadPool::~ThreadPool() {
   for (auto& t : workers_) {
     if (t.joinable()) t.join();
   }
+
+  // Ensure any remaining queued tasks are released.
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    while (!tasks_.empty()) {
+      tasks_.pop();
+    }
+  }
 }
 
 void ThreadPool::enqueue(std::function<void()> task) {
@@ -41,7 +49,11 @@ void ThreadPool::worker_loop() {
       task = std::move(tasks_.front());
       tasks_.pop();
     }
-    task();
+    try {
+      task();
+    } catch (...) {
+      // Swallow exceptions from tasks to keep worker thread alive.
+    }
   }
 }
 
