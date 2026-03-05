@@ -2,6 +2,7 @@
 
 #include <mutex>
 #include <string_view>
+#include <fstream>
 
 class Logger {
 public:
@@ -15,9 +16,10 @@ public:
   static const char* level_to_string(Level level);
 
 private:
-  Logger() = default;
+  Logger();
 
   std::mutex mutex_;
   Level min_level_ = Level::Info;
+  std::ofstream file_;
 };
 

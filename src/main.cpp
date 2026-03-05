@@ -74,8 +74,8 @@ std::string read_file_to_string(const std::string& path) {
 
 } // namespace
 
-void handle_client(int client_fd) {
-  Logger::instance().log(Logger::Level::Info, "Client connected");
+void handle_client(int client_fd, std::string client_ip) {
+  Logger::instance().log(Logger::Level::Info, "Client connected from " + client_ip);
 
   // Read a basic HTTP request (we only care about the request line).
   std::string request_data;
@@ -108,7 +108,8 @@ void handle_client(int client_fd) {
   HTTPRequest req;
   if (!request_data.empty() && req.parse(request_data)) {
     Logger::instance().log(Logger::Level::Info,
-                           "HTTP " + req.method() + " " + req.path() + " " + req.version());
+                           "Request from " + client_ip + " " + req.method() + " " + req.path() +
+                             " " + req.version());
 
     // Basic routing.
     if (req.path() == "/" || req.path() == "/index.html") {
@@ -158,7 +159,7 @@ void handle_client(int client_fd) {
   }
 
   ::close(client_fd);
-  Logger::instance().log(Logger::Level::Info, "Client disconnected");
+  Logger::instance().log(Logger::Level::Info, "Client disconnected from " + client_ip);
 }
 
 int main() {
@@ -210,8 +211,13 @@ int main() {
       continue;
     }
 
+    char ip_buf[INET_ADDRSTRLEN] = {};
+    const char* ip_str =
+        ::inet_ntop(AF_INET, &client.sin_addr, ip_buf, static_cast<socklen_t>(sizeof(ip_buf)));
+    std::string client_ip = ip_str ? ip_str : "unknown";
+
     // Queue client handling in the thread pool.
-    pool.enqueue([client_fd] { handle_client(client_fd); });
+    pool.enqueue([client_fd, client_ip] { handle_client(client_fd, client_ip); });
   }
 }
 

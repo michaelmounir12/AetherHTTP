@@ -3,12 +3,18 @@
 #include <chrono>
 #include <ctime>
 #include <iomanip>
-#include <iostream>
 #include <sstream>
+#include <iostream>
 
 Logger& Logger::instance() {
   static Logger inst;
   return inst;
+}
+
+Logger::Logger() {
+  // Open log file in append mode. If this fails, logging will
+  // fall back to std::cerr in log().
+  file_.open("server.log", std::ios::app);
 }
 
 void Logger::set_level(Level level) {
@@ -43,6 +49,11 @@ void Logger::log(Level level, std::string_view message) {
   std::ostringstream ts;
   ts << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
 
-  std::cerr << "[" << ts.str() << "] [" << level_to_string(level) << "] " << message << "\n";
+  std::ostream* out = file_.is_open()
+                        ? static_cast<std::ostream*>(&file_)
+                        : static_cast<std::ostream*>(&std::cerr);
+
+  (*out) << "[" << ts.str() << "] [" << level_to_string(level) << "] " << message << "\n";
+  out->flush();
 }
 
