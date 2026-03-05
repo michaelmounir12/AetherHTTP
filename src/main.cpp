@@ -110,29 +110,40 @@ void handle_client(int client_fd) {
     Logger::instance().log(Logger::Level::Info,
                            "HTTP " + req.method() + " " + req.path() + " " + req.version());
 
-    std::string file_path;
+    // Basic routing.
     if (req.path() == "/" || req.path() == "/index.html") {
-      file_path = "index.html";
-    } else if (req.path() == "/about.html") {
-      file_path = "about.html";
-    }
-
-    if (!file_path.empty()) {
-      const std::string body = read_file_to_string(file_path);
-      if (!body.empty()) {
-        send_http_response(client_fd,
-                           "HTTP/1.1 200 OK",
-                           "text/html; charset=utf-8",
-                           body);
-      } else {
-        const std::string body_404 =
-            "<!DOCTYPE html><html><head><title>404 Not Found</title></head>"
-            "<body><h1>404 Not Found</h1></body></html>";
-        send_http_response(client_fd,
-                           "HTTP/1.1 404 Not Found",
-                           "text/html; charset=utf-8",
-                           body_404);
+      // Serve index.html if present, otherwise a simple built-in page.
+      std::string body = read_file_to_string("index.html");
+      if (body.empty()) {
+        body =
+            "<!DOCTYPE html><html><head><title>Home</title></head>"
+            "<body><h1>Welcome</h1><p>This is the home page.</p></body></html>";
       }
+      send_http_response(client_fd,
+                         "HTTP/1.1 200 OK",
+                         "text/html; charset=utf-8",
+                         body);
+    } else if (req.path() == "/about" || req.path() == "/about.html") {
+      // Serve about.html if present, otherwise a simple built-in page.
+      std::string body = read_file_to_string("about.html");
+      if (body.empty()) {
+        body =
+            "<!DOCTYPE html><html><head><title>About</title></head>"
+            "<body><h1>About</h1><p>Basic about page.</p></body></html>";
+      }
+      send_http_response(client_fd,
+                         "HTTP/1.1 200 OK",
+                         "text/html; charset=utf-8",
+                         body);
+    } else if (req.path() == "/files") {
+      // Simple placeholder for /files route.
+      const std::string body =
+          "<!DOCTYPE html><html><head><title>Files</title></head>"
+          "<body><h1>Files</h1><p>Files route placeholder.</p></body></html>";
+      send_http_response(client_fd,
+                         "HTTP/1.1 200 OK",
+                         "text/html; charset=utf-8",
+                         body);
     } else {
       const std::string body_404 =
           "<!DOCTYPE html><html><head><title>404 Not Found</title></head>"
