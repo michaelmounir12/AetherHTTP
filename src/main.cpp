@@ -1,13 +1,15 @@
-// Basic TCP server using POSIX sockets that listens on port 8080
+// Basic HTTP server using POSIX sockets that listens on port 8080
 // and handles multiple clients using a ThreadPool.
-// Each client is handled by a worker thread from the pool, echoing
-// received messages back to the client.
+// Each client is handled by a worker thread from the pool, parsing
+// a basic HTTP GET request and responding with 200 OK + HTML.
 
 #include "Logger.h"
 #include "ThreadPool.h"
+#include "HTTPRequest.h"
 
 #include <cerrno>
 #include <cstring>
+#include <string>
 #include <thread> // for std::thread::hardware_concurrency
 
 #if !defined(__linux__)
@@ -26,8 +28,13 @@ int main() {
 void handle_client(int client_fd) {
   Logger::instance().log(Logger::Level::Info, "Client connected");
 
-  char buffer[4096];
-  for (;;) {
+  // Read a basic HTTP request (we only care about the request line).
+  std::string request_data;
+  request_data.reserve(1024);
+
+  char buffer[1024];
+  bool done = false;
+  while (!done) {
     const ssize_t n = ::recv(client_fd, buffer, sizeof(buffer), 0);
     if (n == 0) {
       // Client closed connection
@@ -40,21 +47,55 @@ void handle_client(int client_fd) {
       break;
     }
 
-    ssize_t total_sent = 0;
-    while (total_sent < n) {
-      const ssize_t sent = ::send(client_fd, buffer + total_sent,
-                                  static_cast<std::size_t>(n - total_sent), 0);
+    request_data.append(buffer, buffer + n);
+
+    // Stop once we've read the end of headers.
+    if (request_data.find("\r\n\r\n") != std::string::npos ||
+        request_data.size() > 8192) {
+      done = true;
+    }
+  }
+
+  HTTPRequest req;
+  if (!request_data.empty() && req.parse(request_data)) {
+    Logger::instance().log(Logger::Level::Info,
+                           "HTTP " + req.method() + " " + req.path() + " " + req.version());
+
+    const std::string body =
+        "<!DOCTYPE html>\n"
+        "<html><head><title>Simple Server</title></head>"
+        "<body><h1>Hello from C++ HTTP server</h1>"
+        "<p>You requested: " +
+        req.path() +
+        "</p></body></html>";
+
+    std::string response;
+    response.reserve(256 + body.size());
+    response += "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: text/html; charset=utf-8\r\n";
+    response += "Connection: close\r\n";
+    response += "Content-Length: ";
+    response += std::to_string(body.size());
+    response += "\r\n\r\n";
+    response += body;
+
+    const char* p = response.data();
+    std::size_t remaining = response.size();
+    while (remaining > 0) {
+      const ssize_t sent = ::send(client_fd, p, remaining, 0);
       if (sent < 0) {
         if (errno == EINTR) continue;
         Logger::instance().log(Logger::Level::Warn,
                                std::string("send() failed: ") + std::strerror(errno));
-        goto out;
+        break;
       }
-      total_sent += sent;
+      p += sent;
+      remaining -= static_cast<std::size_t>(sent);
     }
+  } else {
+    Logger::instance().log(Logger::Level::Warn, "Failed to parse HTTP request");
   }
 
-out:
   ::close(client_fd);
   Logger::instance().log(Logger::Level::Info, "Client disconnected");
 }
