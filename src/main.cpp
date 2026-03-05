@@ -1,10 +1,13 @@
 // Basic TCP server using POSIX sockets that listens on port 8080
-// and accepts a single client connection, printing "Client connected".
+// and handles multiple clients using std::thread.
+// Each client is handled in a separate thread, echoing
+// received messages back to the client.
 
 #include "Logger.h"
 
 #include <cerrno>
 #include <cstring>
+#include <thread>
 
 #if !defined(__linux__)
 int main() {
@@ -18,6 +21,42 @@ int main() {
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+void handle_client(int client_fd) {
+  Logger::instance().log(Logger::Level::Info, "Client connected");
+
+  char buffer[4096];
+  for (;;) {
+    const ssize_t n = ::recv(client_fd, buffer, sizeof(buffer), 0);
+    if (n == 0) {
+      // Client closed connection
+      break;
+    }
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      Logger::instance().log(Logger::Level::Warn,
+                             std::string("recv() failed: ") + std::strerror(errno));
+      break;
+    }
+
+    ssize_t total_sent = 0;
+    while (total_sent < n) {
+      const ssize_t sent = ::send(client_fd, buffer + total_sent,
+                                  static_cast<std::size_t>(n - total_sent), 0);
+      if (sent < 0) {
+        if (errno == EINTR) continue;
+        Logger::instance().log(Logger::Level::Warn,
+                               std::string("send() failed: ") + std::strerror(errno));
+        goto out;
+      }
+      total_sent += sent;
+    }
+  }
+
+out:
+  ::close(client_fd);
+  Logger::instance().log(Logger::Level::Info, "Client disconnected");
+}
 
 int main() {
   Logger::instance().set_level(Logger::Level::Info);
@@ -44,7 +83,7 @@ int main() {
     return 1;
   }
 
-  if (::listen(listen_fd, 1) < 0) {
+  if (::listen(listen_fd, SOMAXCONN) < 0) {
     Logger::instance().log(Logger::Level::Error,
                            std::string("listen() failed: ") + std::strerror(errno));
     ::close(listen_fd);
@@ -53,21 +92,20 @@ int main() {
 
   Logger::instance().log(Logger::Level::Info, "Listening on port 8080");
 
-  sockaddr_in client{};
-  socklen_t client_len = sizeof(client);
-  int client_fd = ::accept(listen_fd, reinterpret_cast<sockaddr*>(&client), &client_len);
-  if (client_fd < 0) {
-    Logger::instance().log(Logger::Level::Error,
-                           std::string("accept() failed: ") + std::strerror(errno));
-    ::close(listen_fd);
-    return 1;
+  for (;;) {
+    sockaddr_in client{};
+    socklen_t client_len = sizeof(client);
+    int client_fd = ::accept(listen_fd, reinterpret_cast<sockaddr*>(&client), &client_len);
+    if (client_fd < 0) {
+      Logger::instance().log(Logger::Level::Error,
+                             std::string("accept() failed: ") + std::strerror(errno));
+      continue;
+    }
+
+    // Launch a new thread to handle this client.
+    std::thread t(handle_client, client_fd);
+    t.detach();  // Detach so we don't need to join; threads clean up on exit.
   }
-
-  Logger::instance().log(Logger::Level::Info, "Client connected");
-
-  ::close(client_fd);
-  ::close(listen_fd);
-  return 0;
 }
 
 #endif
