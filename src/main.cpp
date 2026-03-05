@@ -9,6 +9,7 @@
 
 #include <cerrno>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <string>
 #include <thread> // for std::thread::hardware_concurrency
@@ -216,8 +217,19 @@ int main() {
         ::inet_ntop(AF_INET, &client.sin_addr, ip_buf, static_cast<socklen_t>(sizeof(ip_buf)));
     std::string client_ip = ip_str ? ip_str : "unknown";
 
-    // Queue client handling in the thread pool.
-    pool.enqueue([client_fd, client_ip] { handle_client(client_fd, client_ip); });
+    // Queue client handling in the thread pool. If the pool rejects
+    // the task for any reason, make sure we close the client socket.
+    try {
+      pool.enqueue([client_fd, client_ip] { handle_client(client_fd, client_ip); });
+    } catch (const std::exception& ex) {
+      Logger::instance().log(Logger::Level::Error,
+                             std::string("Failed to enqueue client: ") + ex.what());
+      ::close(client_fd);
+    } catch (...) {
+      Logger::instance().log(Logger::Level::Error,
+                             "Failed to enqueue client: unknown error");
+      ::close(client_fd);
+    }
   }
 }
 
