@@ -21,7 +21,6 @@ This project is a simple **multithreaded HTTP server** written in C++20 for **Li
 - `src/`
   - `main.cpp` – Entry point; sets up the listening socket, thread pool, routing, and HTTP handling.
   - `ThreadPool.cpp` – Thread pool implementation.
-  - `HttpRequestParser.cpp` (or `HTTPRequest` implementation, depending on your version) – Basic HTTP request parsing.
   - `Logger.cpp` – Logging implementation.
 - `include/`
   - `ThreadPool.h` – Thread pool interface.

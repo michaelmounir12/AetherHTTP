@@ -7,7 +7,9 @@
 #include "ThreadPool.h"
 #include "HTTPRequest.h"
 
+#include <atomic>
 #include <cerrno>
+#include <csignal>
 #include <cstring>
 #include <exception>
 #include <fstream>
@@ -26,6 +28,13 @@ int main() {
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+// ---------------------------------------------------------------------------
+// Graceful-shutdown flag, set by SIGINT / SIGTERM handler.
+// ---------------------------------------------------------------------------
+static std::atomic<bool> g_running{true};
+
+static void signal_handler(int /*sig*/) { g_running.store(false); }
 
 namespace {
 
@@ -94,6 +103,10 @@ std::string guess_content_type(const std::string& path) {
 
 void handle_client(int client_fd, std::string client_ip) {
   Logger::instance().log(Logger::Level::Info, "Client connected from " + client_ip);
+
+  // Set a receive timeout to guard against slow / malicious clients.
+  struct timeval tv { .tv_sec = 5, .tv_usec = 0 };
+  ::setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
   // Read a basic HTTP request (we only care about the request line).
   std::string request_data;
@@ -198,6 +211,10 @@ void handle_client(int client_fd, std::string client_ip) {
 }
 
 int main() {
+  // Install signal handlers for graceful shutdown.
+  std::signal(SIGINT, signal_handler);
+  std::signal(SIGTERM, signal_handler);
+
   Logger::instance().set_level(Logger::Level::Info);
 
   // Fixed-size thread pool; adjust size as needed.
@@ -236,13 +253,18 @@ int main() {
 
   Logger::instance().log(Logger::Level::Info, "Listening on port 8080");
 
-  for (;;) {
+  while (g_running.load()) {
     sockaddr_in client{};
     socklen_t client_len = sizeof(client);
     int client_fd = ::accept(listen_fd, reinterpret_cast<sockaddr*>(&client), &client_len);
     if (client_fd < 0) {
-      Logger::instance().log(Logger::Level::Error,
-                             std::string("accept() failed: ") + std::strerror(errno));
+      // accept() returns -1 with EINTR when a signal interrupts it — this
+      // is the normal path when the shutdown signal fires.
+      if (errno == EINTR) continue;
+      if (g_running.load()) {
+        Logger::instance().log(Logger::Level::Error,
+                               std::string("accept() failed: ") + std::strerror(errno));
+      }
       continue;
     }
 
@@ -254,7 +276,9 @@ int main() {
     // Queue client handling in the thread pool. If the pool rejects
     // the task for any reason, make sure we close the client socket.
     try {
-      pool.enqueue([client_fd, client_ip] { handle_client(client_fd, client_ip); });
+      pool.enqueue([client_fd, ip = std::move(client_ip)] {
+        handle_client(client_fd, std::move(ip));
+      });
     } catch (const std::exception& ex) {
       Logger::instance().log(Logger::Level::Error,
                              std::string("Failed to enqueue client: ") + ex.what());
@@ -265,6 +289,12 @@ int main() {
       ::close(client_fd);
     }
   }
+
+  // Graceful shutdown: close the listening socket, then let the ThreadPool
+  // destructor drain remaining tasks and join worker threads.
+  ::close(listen_fd);
+  Logger::instance().log(Logger::Level::Info, "Server shutting down gracefully.");
+  return 0;
 }
 
 #endif

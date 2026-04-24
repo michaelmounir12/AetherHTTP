@@ -1,5 +1,7 @@
 #include "ThreadPool.h"
 
+#include "Logger.h"
+
 #include <stdexcept>
 
 ThreadPool::ThreadPool(std::size_t thread_count) {
@@ -51,8 +53,12 @@ void ThreadPool::worker_loop() {
     }
     try {
       task();
+    } catch (const std::exception& ex) {
+      Logger::instance().log(Logger::Level::Error,
+          std::string("Uncaught exception in task: ") + ex.what());
     } catch (...) {
-      // Swallow exceptions from tasks to keep worker thread alive.
+      Logger::instance().log(Logger::Level::Error,
+          "Uncaught unknown exception in task");
     }
   }
 }

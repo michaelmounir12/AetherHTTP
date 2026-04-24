@@ -14,7 +14,6 @@ find_package(Threads REQUIRED)
 add_executable(server
   src/main.cpp
   src/ThreadPool.cpp
-  src/HttpRequestParser.cpp
   src/Logger.cpp
 )
 
